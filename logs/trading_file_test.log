@@ -1,1 +1,0 @@
-{"timestamp": "2025-08-01T10:49:12.399600", "level": "INFO", "component": "trading.file_test", "thread_id": 137681319940224, "process_id": 3654, "message": "Testing log file creation", "extra": {"taskName": null}}

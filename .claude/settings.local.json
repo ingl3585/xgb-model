@@ -6,8 +6,18 @@
       "Bash(ls:*)",
       "Bash(python3:*)",
       "Bash(python test:*)",
-      "Bash(rm:*)"
+      "Bash(rm -rf __pycache__:*)",
+      "Bash(cat:*.log)",
+      "Bash(grep:*)",
+      "Bash(env)",
+      "Bash(pip list)",
+      "Bash(pip show:*)"
     ],
-    "deny": []
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(sudo:*)",
+      "Bash(shutdown:*)",
+      "Bash(reboot:*)"
+    ]
   }
 }

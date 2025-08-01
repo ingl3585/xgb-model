@@ -202,7 +202,11 @@ def handle_client(client_socket):
                     'Close': [close],
                     'Volume': [volume]
                 })
-                df = pd.concat([df, new_row], ignore_index=True)
+                # Fix pandas FutureWarning by ensuring proper concatenation
+                if df.empty:
+                    df = new_row.copy()
+                else:
+                    df = pd.concat([df, new_row], ignore_index=True)
                 
                 # Prevent memory leaks by limiting DataFrame size
                 if len(df) > config.TRAINING_WINDOW * 2:
@@ -218,9 +222,38 @@ def handle_client(client_socket):
                         }
                     )
                 
+                # Prepare features for real-time data after sufficient bars accumulated
+                # This ensures features are recalculated with each new bar of data
+                if len(df) >= config.RSI_PERIOD:
+                    try:
+                        df, features = prepare_features(df)
+                        data_logger.debug(
+                            "Features recalculated for real-time data",
+                            extra={
+                                'bars_processed': len(df),
+                                'features_count': len(features) if features else 0,
+                                'historical_complete': historical_processing_complete,
+                                'client_thread': threading.current_thread().name
+                            }
+                        )
+                    except Exception as e:
+                        data_logger.error(
+                            "Failed to prepare features for real-time data",
+                            extra={
+                                'error_type': type(e).__name__,
+                                'bars_available': len(df),
+                                'client_thread': threading.current_thread().name
+                            },
+                            exc_info=True
+                        )
+                        # Continue with old features if available, or skip signal generation
+                        if features is None:
+                            send_response(client_socket, "LEARNING")
+                            continue
+
                 # Generate signal only if historical processing is complete
                 with model_lock:
-                    if historical_processing_complete and model is not None:
+                    if historical_processing_complete and model is not None and features is not None:
                         signal = generate_signals(df, model, features)
                         # Send signal back to NinjaScript
                         send_response(client_socket, signal)
@@ -244,17 +277,26 @@ def handle_client(client_socket):
                                     'client_thread': threading.current_thread().name
                                 }
                             )
-                        else:
+                        elif model is None:
                             tcp_logger.warning(
                                 "Model unavailable - sending LEARNING status",
                                 extra={
-                                    'model_status': 'None' if model is None else 'Available',
+                                    'model_status': 'None',
+                                    'client_thread': threading.current_thread().name
+                                }
+                            )
+                        elif features is None:
+                            tcp_logger.warning(
+                                "Features unavailable - sending LEARNING status",
+                                extra={
+                                    'features_status': 'None',
+                                    'bars_available': len(df),
                                     'client_thread': threading.current_thread().name
                                 }
                             )
                 
                 # Retrain model periodically
-                if len(df) % config.RETRAIN_INTERVAL == 0:
+                if len(df) % config.RETRAIN_INTERVAL == 0 and len(df) >= 100:
                     start_time = time.time()
                     data_logger.info(
                         "Starting periodic model retraining",
@@ -267,23 +309,45 @@ def handle_client(client_socket):
                     
                     with model_lock:
                         try:
-                            model = train_model(df, features)
-                            retrain_time = time.time() - start_time
+                            # Ensure features are prepared for retraining
+                            if features is None and len(df) >= config.RSI_PERIOD:
+                                data_logger.info(
+                                    "Preparing features for model retraining",
+                                    extra={
+                                        'bars_available': len(df),
+                                        'client_thread': threading.current_thread().name
+                                    }
+                                )
+                                df, features = prepare_features(df)
                             
-                            log_trading_event(
-                                data_logger,
-                                'model_retrained',
-                                bars_used=len(df),
-                                features_count=len(features),
-                                retrain_time_seconds=round(retrain_time, 3)
-                            )
-                            
+                            if features is not None:
+                                model = train_model(df, features)
+                                retrain_time = time.time() - start_time
+                                
+                                log_trading_event(
+                                    data_logger,
+                                    'model_retrained',
+                                    bars_used=len(df),
+                                    features_count=len(features),
+                                    retrain_time_seconds=round(retrain_time, 3)
+                                )
+                            else:
+                                data_logger.error(
+                                    "Cannot retrain model: features are None",
+                                    extra={
+                                        'bars_available': len(df),
+                                        'rsi_period_required': config.RSI_PERIOD,
+                                        'client_thread': threading.current_thread().name
+                                    }
+                                )
+                                
                         except Exception as e:
                             data_logger.error(
                                 "Model retraining failed",
                                 extra={
                                     'error_type': type(e).__name__,
                                     'bars_attempted': len(df),
+                                    'features_available': features is not None,
                                     'client_thread': threading.current_thread().name
                                 },
                                 exc_info=True

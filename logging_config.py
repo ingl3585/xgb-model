@@ -14,6 +14,80 @@ import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+# Conditional imports for numpy/pandas - only needed for the JSON encoder
+try:
+    import numpy as np
+    import pandas as pd
+    NUMPY_PANDAS_AVAILABLE = True
+except ImportError:
+    np = None
+    pd = None
+    NUMPY_PANDAS_AVAILABLE = False
+
+
+class NumpyPandasJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that handles numpy/pandas data types.
+    
+    Converts numpy and pandas types to native Python types for JSON serialization:
+    - numpy integers (int8, int16, int32, int64) -> int
+    - numpy floats (float16, float32, float64) -> float
+    - numpy arrays -> list
+    - pandas Series -> list
+    - pandas DataFrames -> dict
+    - numpy bool -> bool
+    - numpy datetime64 -> ISO string
+    
+    If numpy/pandas are not available, falls back to standard JSON serialization.
+    """
+    
+    def default(self, obj):
+        """Convert numpy/pandas objects to JSON serializable types."""
+        
+        # If numpy/pandas are not available, use standard JSON serialization
+        if not NUMPY_PANDAS_AVAILABLE:
+            return super().default(obj)
+        
+        # Handle numpy integer types
+        if isinstance(obj, (np.integer, np.int8, np.int16, np.int32, np.int64)):
+            return int(obj)
+        
+        # Handle numpy float types
+        if isinstance(obj, (np.floating, np.float16, np.float32, np.float64)):
+            return float(obj)
+        
+        # Handle numpy boolean
+        if isinstance(obj, (np.bool_, np.bool8)):
+            return bool(obj)
+        
+        # Handle numpy arrays
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        
+        # Handle pandas Series
+        if isinstance(obj, pd.Series):
+            return obj.tolist()
+        
+        # Handle pandas DataFrame
+        if isinstance(obj, pd.DataFrame):
+            return obj.to_dict()
+        
+        # Handle numpy datetime64
+        if isinstance(obj, (np.datetime64, pd.Timestamp)):
+            return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
+        
+        # Handle pandas Index
+        if isinstance(obj, pd.Index):
+            return obj.tolist()
+        
+        # Handle other pandas/numpy types by converting to string
+        if hasattr(obj, 'dtype') and hasattr(obj.dtype, 'name'):
+            if obj.dtype.name.startswith(('int', 'uint', 'float', 'bool')):
+                return obj.item() if hasattr(obj, 'item') else str(obj)
+        
+        # Fallback to default JSON encoder behavior
+        return super().default(obj)
+
 
 class TradingJsonFormatter(logging.Formatter):
     """
@@ -60,7 +134,7 @@ class TradingJsonFormatter(logging.Formatter):
         if extra_fields:
             log_entry['extra'] = extra_fields
         
-        return json.dumps(log_entry, ensure_ascii=False)
+        return json.dumps(log_entry, ensure_ascii=False, cls=NumpyPandasJSONEncoder)
 
 
 class PerformanceFilter(logging.Filter):

@@ -1,1 +1,0 @@
-{"timestamp": "2025-08-01T10:49:11.849446", "level": "INFO", "component": "trading.signals", "thread_id": 137681319940224, "process_id": 3654, "message": "Signal generation test", "extra": {"taskName": null}}
