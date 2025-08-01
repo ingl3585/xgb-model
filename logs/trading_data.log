@@ -1,0 +1,1 @@
+{"timestamp": "2025-08-01T10:49:11.846915", "level": "INFO", "component": "trading.data", "thread_id": 137681319940224, "process_id": 3654, "message": "Data processing test", "extra": {"taskName": null}}

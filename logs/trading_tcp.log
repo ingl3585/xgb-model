@@ -1,0 +1,3 @@
+{"timestamp": "2025-08-01T10:49:11.839508", "level": "INFO", "component": "trading.tcp", "thread_id": 137681319940224, "process_id": 3654, "message": "TCP info message test", "extra": {"taskName": null}}
+{"timestamp": "2025-08-01T10:49:11.842171", "level": "WARNING", "component": "trading.tcp", "thread_id": 137681319940224, "process_id": 3654, "message": "TCP warning message test", "extra": {"taskName": null}}
+{"timestamp": "2025-08-01T10:49:11.844463", "level": "ERROR", "component": "trading.tcp", "thread_id": 137681319940224, "process_id": 3654, "message": "TCP error message test", "extra": {"taskName": null}}

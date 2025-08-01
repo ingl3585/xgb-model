@@ -1,0 +1,2 @@
+{"timestamp": "2025-08-01T10:49:11.819957", "level": "INFO", "component": "trading.system", "thread_id": 137681319940224, "process_id": 3654, "message": "Trading system logging initialized", "extra": {"taskName": null, "log_level": "INFO", "log_directory": "logs", "console_output": true}}
+{"timestamp": "2025-08-01T10:49:11.845850", "level": "INFO", "component": "trading.system", "thread_id": 137681319940224, "process_id": 3654, "message": "System initialization test", "extra": {"taskName": null}}
