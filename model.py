@@ -14,6 +14,7 @@ MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 MODEL_CACHE = None
+FEATURE_CACHE = {}
 
 def _compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -42,30 +43,39 @@ def _compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+def prepare_features(df: pd.DataFrame, cache_key: str = None) -> Tuple[pd.DataFrame, pd.Series]:
+    # Check cache
+    if cache_key and cache_key in FEATURE_CACHE:
+        df_len = len(df)
+        cached_len, cached_X, cached_y = FEATURE_CACHE[cache_key]
+        if df_len == cached_len:
+            return cached_X, cached_y
+    
     df = df.copy()
     
-    # Rename columns to lowercase
+    # Rename columns
     column_mapping = {
-        'Open': 'open',
-        'High': 'high', 
-        'Low': 'low',
-        'Close': 'close',
-        'Volume': 'volume',
-        'Timestamp': 'timestamp'
+        'Open': 'open', 'High': 'high', 'Low': 'low',
+        'Close': 'close', 'Volume': 'volume', 'Timestamp': 'timestamp'
     }
     df = df.rename(columns=column_mapping)
     
+    # Compute indicators only once
     df = _compute_indicators(df)
     df = df.dropna()
-
-    feature_cols: List[str] = [
+    
+    feature_cols = [
         'EMA_diff', 'RSI', 'MACD', 'MACD_hist', 'BOLL_width', 
         'ATR', 'return_1', 'close', 'VWAP'
     ]
-
+    
     X = df[feature_cols]
     y = df['target']
+    
+    # Cache the result
+    if cache_key:
+        FEATURE_CACHE[cache_key] = (len(df), X, y)
+    
     return X, y
 
 def train_model(df: pd.DataFrame, model_name: str = "xgb_classifier.joblib") -> Dict[str, float]:
@@ -133,7 +143,13 @@ def _load_model(model_name: str = "xgb_classifier.joblib"):
 
 def predict(df_recent: pd.DataFrame, model_name: str = "xgb_classifier.joblib") -> Tuple[int, float]:
     model = _load_model(model_name)
-    X, _ = prepare_features(df_recent)
+    
+    # Use cache for feature preparation
+    X, _ = prepare_features(df_recent, cache_key="predict")
+    
+    if len(X) == 0:
+        return 0, 0.5  # Return HOLD if no valid features
+    
     latest_row = X.iloc[[-1]]
     prob_up = float(model.predict_proba(latest_row)[0, 1])
     signal = int(prob_up > config.XGB_PREDICTION_THRESHOLD)

@@ -112,38 +112,65 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         protected override void OnBarUpdate()
         {
-            if (State != State.Realtime || CurrentBar < BarsRequiredToTrade || client == null || !client.Connected || !historicalDataSent)
+            if (State != State.Realtime || CurrentBar < BarsRequiredToTrade || 
+                client == null || !client.Connected || !historicalDataSent)
                 return;
 
             try
             {
-                // Send real-time bar data
+                // Send real-time bar
                 string barData = $"{Time[0]:yyyy-MM-dd HH:mm:ss},{Open[0]:F2},{High[0]:F2},{Low[0]:F2},{Close[0]:F2},{Volume[0]}";
                 byte[] data = Encoding.UTF8.GetBytes(barData + "\n");
                 stream.Write(data, 0, data.Length);
                 stream.Flush();
 
-                // Get trading signal
+                // Get signal
                 string signal = ReadResponse();
                 
-                // Execute trades based on signal
-                if (!string.IsNullOrEmpty(signal))
+                // Better signal execution
+                if (signal == "BUY")
                 {
-                    if (signal == "BUY" && Position.MarketPosition == MarketPosition.Flat)
+                    if (Position.MarketPosition == MarketPosition.Flat)
                     {
                         EnterLong(contractSize, "Long");
-                        SetStopLoss("Long", CalculationMode.Ticks, stopLossTicks, false);
-                        SetProfitTarget("Long", CalculationMode.Ticks, profitTargetTicks);
-                        Print($"BUY signal at {Close[0]:F2}");
                     }
-                    else if (signal == "SELL" && Position.MarketPosition == MarketPosition.Flat)
+                    else if (Position.MarketPosition == MarketPosition.Short)
+                    {
+                        // Reverse position
+                        ExitShort();
+                        EnterLong(contractSize, "Long");
+                    }
+                    // Already long? Hold position
+                }
+                else if (signal == "SELL")
+                {
+                    if (Position.MarketPosition == MarketPosition.Flat)
                     {
                         EnterShort(contractSize, "Short");
-                        SetStopLoss("Short", CalculationMode.Ticks, stopLossTicks, false);
-                        SetProfitTarget("Short", CalculationMode.Ticks, profitTargetTicks);
-                        Print($"SELL signal at {Close[0]:F2}");
                     }
-                    // HOLD = no action
+                    else if (Position.MarketPosition == MarketPosition.Long)
+                    {
+                        // Reverse position
+                        ExitLong();
+                        EnterShort(contractSize, "Short");
+                    }
+                    // Already short? Hold position
+                }
+                else // HOLD
+                {
+                    // Could add logic for closing positions on HOLD if needed
+                }
+                
+                // Set stops/targets after entry
+                if (Position.MarketPosition == MarketPosition.Long)
+                {
+                    SetStopLoss("Long", CalculationMode.Ticks, stopLossTicks, false);
+                    SetProfitTarget("Long", CalculationMode.Ticks, profitTargetTicks);
+                }
+                else if (Position.MarketPosition == MarketPosition.Short)
+                {
+                    SetStopLoss("Short", CalculationMode.Ticks, stopLossTicks, false);
+                    SetProfitTarget("Short", CalculationMode.Ticks, profitTargetTicks);
                 }
             }
             catch (Exception e)
