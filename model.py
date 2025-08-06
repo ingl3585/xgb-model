@@ -44,9 +44,8 @@ def _compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     df = df.copy()
-    print(f"Starting with {len(df)} bars")
     
-    # First rename columns to lowercase for consistency with indicators
+    # Rename columns to lowercase
     column_mapping = {
         'Open': 'open',
         'High': 'high', 
@@ -56,29 +55,9 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         'Timestamp': 'timestamp'
     }
     df = df.rename(columns=column_mapping)
-    print(f"After renaming columns: {len(df)} bars")
     
     df = _compute_indicators(df)
-    print(f"After computing indicators: {len(df)} bars")
-    print(f"Columns after indicators: {df.columns.tolist()}")
-    
-    # Check for NaN values before dropping
-    nan_counts = df.isnull().sum()
-    print(f"NaN counts per column:\n{nan_counts}")
-    
-    # Instead of aggressive dropna(), only drop rows where critical features are NaN
-    # Keep rows where only early-period indicators are NaN (expected behavior)
-    critical_features = ['close', 'EMA_diff', 'RSI', 'MACD', 'VWAP', 'return_1', 'target']
-    
-    # Fill NaN Bollinger Bands with reasonable defaults for early periods
-    df['BOLL_width'] = df['BOLL_width'].fillna(0.02)  # Default width
-    df['BOLL_mid'] = df['BOLL_mid'].fillna(df['close'])  # Use close price
-    df['BOLL_up'] = df['BOLL_up'].fillna(df['close'] * 1.01)  # Close + 1%
-    df['BOLL_low'] = df['BOLL_low'].fillna(df['close'] * 0.99)  # Close - 1%
-    
-    # Only drop rows where critical features are still NaN
-    df = df.dropna(subset=critical_features)
-    print(f"After selective dropna(): {len(df)} bars")
+    df = df.dropna()
 
     feature_cols: List[str] = [
         'EMA_diff', 'RSI', 'MACD', 'MACD_hist', 'BOLL_width', 
@@ -92,48 +71,13 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 def train_model(df: pd.DataFrame, model_name: str = "xgb_classifier.joblib") -> Dict[str, float]:
     X, y = prepare_features(df)
     
-    print(f"After feature preparation: X shape {X.shape}, y shape {y.shape}")
-    
-    if len(X) == 0:
-        raise ValueError("No samples left after feature preparation")
-    
-    # Adjust number of folds based on available data
-    if len(X) < 50:
-        # For very small datasets, skip cross-validation and train directly
-        print(f"Small dataset ({len(X)} samples), skipping cross-validation")
-        n_splits = 0
-    else:
-        n_splits = min(config.XGB_N_SPLITS, len(X) // 10)  # At least 10 samples per fold
-        n_splits = max(2, n_splits)  # Minimum 2 folds
-        print(f"Using {n_splits} cross-validation folds for {len(X)} samples")
-    
+    tss = TimeSeriesSplit(n_splits=config.XGB_N_SPLITS)
+    metrics = {}
+
     class_weights = y.value_counts(normalize=True)
     weights = y.map({cls: 1.0 / w for cls, w in class_weights.items()})
     best_iteration_scores = []
-    metrics = {}
-    
-    if n_splits == 0:
-        # Skip cross-validation for small datasets
-        print("Training single model without cross-validation")
-        final_model = XGBClassifier(
-            objective="binary:logistic",
-            eval_metric="logloss",
-            n_estimators=min(50, config.XGB_N_ESTIMATORS),  # Reduce estimators for small datasets
-            learning_rate=config.XGB_LEARNING_RATE,
-            max_depth=min(3, config.XGB_MAX_DEPTH),  # Reduce depth for small datasets
-            subsample=config.XGB_SUBSAMPLE,
-            colsample_bytree=config.XGB_COLSAMPLE_BYTREE,
-            n_jobs=-1,
-            random_state=config.XGB_RANDOM_STATE
-        )
-        final_model.fit(X, y, sample_weight=weights, verbose=False)
-        joblib.dump(final_model, os.path.join(MODELS_DIR, model_name))
-        metrics["simple_training"] = True
-        return metrics
-    
-    # Cross-validation training for larger datasets
-    tss = TimeSeriesSplit(n_splits=n_splits)
-    
+
     for fold, (train_idx, val_idx) in enumerate(tss.split(X)):
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
@@ -188,9 +132,6 @@ def _load_model(model_name: str = "xgb_classifier.joblib"):
     return MODEL_CACHE
 
 def predict(df_recent: pd.DataFrame, model_name: str = "xgb_classifier.joblib") -> Tuple[int, float]:
-    if df_recent.empty:
-        raise ValueError("Input dataframe is empty for prediction")
-    
     model = _load_model(model_name)
     X, _ = prepare_features(df_recent)
     latest_row = X.iloc[[-1]]

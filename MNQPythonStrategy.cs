@@ -39,7 +39,7 @@ namespace NinjaTrader.NinjaScript.Strategies
         private int contractSize = 1;
         private int stopLossTicks = 50;
         private int profitTargetTicks = 100;
-        private int historicalBarsToSend = 5000;
+        private int historicalBarsToSend = 240;
 
         protected override void OnStateChange()
         {
@@ -54,15 +54,9 @@ namespace NinjaTrader.NinjaScript.Strategies
             }
             else if (State == State.Realtime)
             {
-                Print("Entered real-time state");
                 if (!historicalDataSent && client != null && client.Connected)
                 {
-                    Print("Sending historical data...");
                     SendHistoricalData();
-                }
-                else
-                {
-                    Print($"Historical data already sent: {historicalDataSent}, Connected: {client?.Connected}");
                 }
             }
             else if (State == State.Terminated)
@@ -107,17 +101,8 @@ namespace NinjaTrader.NinjaScript.Strategies
                 stream.Write(buffer, 0, buffer.Length);
                 stream.Flush();
 
-                string response = ReadResponse();
-                Print($"Historical data sent, response: {response}");
-                if (response == "HISTORICAL_PROCESSED")
-                {
-                    historicalDataSent = true;
-                    Print("Historical data confirmed by Python server");
-                }
-                else
-                {
-                    Print("Historical data not confirmed - check Python server");
-                }
+                historicalDataSent = true;
+                Print($"Historical data sent: {barsToSend} bars");
             }
             catch (Exception e)
             {
@@ -127,10 +112,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         protected override void OnBarUpdate()
         {
-            if (State != State.Realtime || 
-                CurrentBar < BarsRequiredToTrade || 
-                client == null || !client.Connected || 
-                !historicalDataSent)
+            if (State != State.Realtime || CurrentBar < BarsRequiredToTrade || client == null || !client.Connected || !historicalDataSent)
                 return;
 
             try
@@ -144,24 +126,29 @@ namespace NinjaTrader.NinjaScript.Strategies
                 // Get trading signal
                 string signal = ReadResponse();
                 
-                // Execute trades
-                if (signal == "BUY" && Position.MarketPosition == MarketPosition.Flat)
+                // Execute trades based on signal
+                if (!string.IsNullOrEmpty(signal))
                 {
-                    EnterLong(contractSize, "Long");
-                    SetStopLoss("Long", CalculationMode.Ticks, stopLossTicks, false);
-                    SetProfitTarget("Long", CalculationMode.Ticks, profitTargetTicks);
-                }
-                else if (signal == "SELL" && Position.MarketPosition == MarketPosition.Flat)
-                {
-                    EnterShort(contractSize, "Short");
-                    SetStopLoss("Short", CalculationMode.Ticks, stopLossTicks, false);
-                    SetProfitTarget("Short", CalculationMode.Ticks, profitTargetTicks);
+                    if (signal == "BUY" && Position.MarketPosition == MarketPosition.Flat)
+                    {
+                        EnterLong(contractSize, "Long");
+                        SetStopLoss("Long", CalculationMode.Ticks, stopLossTicks, false);
+                        SetProfitTarget("Long", CalculationMode.Ticks, profitTargetTicks);
+                        Print($"BUY signal at {Close[0]:F2}");
+                    }
+                    else if (signal == "SELL" && Position.MarketPosition == MarketPosition.Flat)
+                    {
+                        EnterShort(contractSize, "Short");
+                        SetStopLoss("Short", CalculationMode.Ticks, stopLossTicks, false);
+                        SetProfitTarget("Short", CalculationMode.Ticks, profitTargetTicks);
+                        Print($"SELL signal at {Close[0]:F2}");
+                    }
+                    // HOLD = no action
                 }
             }
             catch (Exception e)
             {
                 Print($"Error: {e.Message}");
-                ConnectToServer(); // Simple reconnect
             }
         }
 
@@ -173,9 +160,10 @@ namespace NinjaTrader.NinjaScript.Strategies
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
                 return Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim();
             }
-            catch
+            catch (Exception e)
             {
-                return null;
+                Print($"Error: {e.Message}");
+                return "HOLD";
             }
         }
 

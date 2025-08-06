@@ -20,5 +20,7 @@ def process_historical_data(data_str):
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
     df[numeric_columns] = df[numeric_columns].astype(float)
+
+    print(f'Historical Data: {df.head()}')
     
     return df
