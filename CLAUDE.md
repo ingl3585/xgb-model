@@ -11,12 +11,6 @@ python3 main.py
 This starts the TCP server that listens for connections from NinjaScript trading platform.
 
 ### Required Dependencies
-The project requires these Python packages:
-- pandas (data manipulation)
-- xgboost (machine learning model)
-- scikit-learn (ML utilities and metrics)
-
-Install with:
 ```bash
 pip install pandas xgboost scikit-learn
 ```

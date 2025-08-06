@@ -1,2 +1,0 @@
-{"timestamp": "2025-08-01T11:51:22.814594", "level": "INFO", "component": "trading.tcp", "thread_id": 12528, "process_id": 12036, "message": "Trading event: client_connected", "extra": {"taskName": null, "event_type": "client_connected", "event_data": {"client_address": "127.0.0.1", "client_port": 60780, "total_active_connections": 1}}}
-{"timestamp": "2025-08-01T12:07:50.120730", "level": "INFO", "component": "trading.tcp", "thread_id": 3508, "process_id": 12036, "message": "Client connection closed", "extra": {"taskName": null, "client_thread": "Thread-1 (handle_client)"}}

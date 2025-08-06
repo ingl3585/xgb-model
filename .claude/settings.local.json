@@ -11,7 +11,10 @@
       "Bash(grep:*)",
       "Bash(env)",
       "Bash(pip list)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "WebFetch(domain:xgboost.readthedocs.io)",
+      "Bash(rm:*)",
+      "WebFetch(domain:ninjatrader.com)"
     ],
     "deny": [
       "Bash(rm -rf /:*)",

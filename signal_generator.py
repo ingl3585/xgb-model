@@ -1,48 +1,45 @@
 import pandas as pd
 import numpy as np
 from collections import deque
-from typing import Deque, Tuple
+from typing import Deque
 
 import model
-import indicators
+import config
 
-CONF_HISTORY: Deque[float] = deque(maxlen=100)  # Track recent probability scores
+# Track recent signal accuracy (1.0 = win, 0.0 = loss)
+ACCURACY_HISTORY: Deque[float] = deque(maxlen=50)
 
 def _dynamic_threshold() -> float:
-    if not CONF_HISTORY:
-        return 0.55  # sensible default
-    mean_conf = np.mean(CONF_HISTORY)
-    # Encourage selectivity when model has been confident recently
-    return min(max(mean_conf, 0.5), 0.7)
+    if not ACCURACY_HISTORY:
+        return config.SIGNAL_DEFAULT_THRESHOLD
+    
+    recent_accuracy = np.mean(ACCURACY_HISTORY)
+    
+    # Adjust threshold based on recent performance
+    if recent_accuracy < 0.35:  # Poor performance
+        adjustment = 0.1
+    elif recent_accuracy < 0.5:  # Below breakeven
+        adjustment = 0.05
+    elif recent_accuracy > 0.65:  # Good performance
+        adjustment = -0.05
+    else:  # Neutral performance
+        adjustment = 0.0
+    
+    threshold = config.SIGNAL_DEFAULT_THRESHOLD + adjustment
+    return min(max(threshold, config.SIGNAL_THRESHOLD_MIN), config.SIGNAL_THRESHOLD_MAX)
 
-def _volatility_ok(df: pd.DataFrame) -> bool:
-    atr = indicators.calculate_atr(df).iloc[-1]
-    atr_series = indicators.calculate_atr(df)
-    threshold = atr_series.quantile(0.2)
-    return bool(atr > threshold)
-
-def _bollinger_ok(df: pd.DataFrame) -> bool:
-    _, upper, lower = indicators.calculate_bollinger_bands(df)
-    price = df['close'].iloc[-1]
-    proximity = min(abs(price - lower.iloc[-1]), abs(upper.iloc[-1] - price)) / (upper.iloc[-1] - lower.iloc[-1])
-    return bool(proximity < 0.25)  # within 25% of band
-
-def generate_signal(df: pd.DataFrame) -> Tuple[int, float]:
+def generate_signal(df: pd.DataFrame) -> str:
     signal, prob = model.predict(df)
-
-    # Update history
-    CONF_HISTORY.append(prob)
-
-    # Adaptive threshold
+    
     threshold = _dynamic_threshold()
-    LOGGER.debug("Adaptive threshold: %.3f", threshold)
-
-    # Volatility/band filters
-    if not _volatility_ok(df) or not _bollinger_ok(df):
-        LOGGER.debug("Filters veto trade: volatility_ok=%s bollinger_ok=%s", _volatility_ok(df), _bollinger_ok(df))
-        return 0, prob
-
     if prob > threshold:
-        return signal, prob
+        if signal == 1:
+            return "BUY"
+        else:
+            return "SELL"
     else:
-        return 0, prob
+        return "HOLD"
+
+def record_result(was_correct: bool):
+    """Record whether the last signal was correct"""
+    ACCURACY_HISTORY.append(1.0 if was_correct else 0.0)

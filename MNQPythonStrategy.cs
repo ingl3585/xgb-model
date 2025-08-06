@@ -1,127 +1,122 @@
 #region Using declarations
 using System;
-using System.Net.Sockets;
-using System.Text;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Xml.Serialization;
+using System.Net.Sockets;
 using NinjaTrader.Cbi;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Chart;
+using NinjaTrader.Gui.SuperDom;
+using NinjaTrader.Gui.Tools;
 using NinjaTrader.Data;
 using NinjaTrader.NinjaScript;
+using NinjaTrader.Core.FloatingPoint;
+using NinjaTrader.NinjaScript.Indicators;
+using NinjaTrader.NinjaScript.DrawingTools;
 #endregion
 
 namespace NinjaTrader.NinjaScript.Strategies
 {
     public class MNQPythonStrategy : Strategy
     {
-        private string host = "localhost";  // Must match config.HOST
-        private int port = 9999;  // Must match config.PORT
         private TcpClient client;
         private NetworkStream stream;
-        private double stopLossTicks = 50;  // Must match config.STOP_LOSS_TICKS
-        private double profitTargetTicks = 50;  // Must match config.PROFIT_TARGET_TICKS
-        private int contractSize = 1;  // Must match config.CONTRACT_SIZE
-        private int historicalBarsToSend = 5000;  // Must match config.HISTORICAL_BARS
         private bool historicalDataSent = false;
-        private const string DELIMITER = "||";  // Must match config.DELIMITER
+        
+        // Connection settings
+        private string host = "localhost";
+        private int port = 9999;
+        
+        // Trading settings
+        private int contractSize = 1;
+        private int stopLossTicks = 50;
+        private int profitTargetTicks = 100;
+        private int historicalBarsToSend = 5000;
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
-                Description = "MNQ Strategy with Python, VWAP, and ML via TCP";
                 Name = "MNQPythonStrategy";
-                Calculate = Calculate.OnBarClose;
-                EntriesPerDirection = 1;
-                EntryHandling = EntryHandling.AllEntries;
-                IsExitOnSessionCloseStrategy = true;
-                ExitOnSessionCloseSeconds = 30;
-                IsFillLimitOnTouch = false;
-                MaximumBarsLookBack = MaximumBarsLookBack.Infinite;
-                OrderFillResolution = OrderFillResolution.Standard;
-                Slippage = 0;
-                StartBehavior = StartBehavior.WaitUntilFlat;
-                TimeInForce = TimeInForce.Gtc;
-                TraceOrders = false;
-                RealtimeErrorHandling = RealtimeErrorHandling.StopCancelClose;
-                StopTargetHandling = StopTargetHandling.PerEntryExecution;
-                BarsRequiredToTrade = 20;
+                BarsRequiredToTrade = 1;
+            }
+            else if (State == State.DataLoaded)
+            {
+                ConnectToServer();
             }
             else if (State == State.Realtime)
             {
-                // Connect to Python TCP server
-                try
+                Print("Entered real-time state");
+                if (!historicalDataSent && client != null && client.Connected)
                 {
-                    client = new TcpClient(host, port);
-                    stream = client.GetStream();
-                    Print("Connected to Python server");
+                    Print("Sending historical data...");
                     SendHistoricalData();
                 }
-                catch (Exception e)
+                else
                 {
-                    Print($"Failed to connect to server: {e.Message}");
+                    Print($"Historical data already sent: {historicalDataSent}, Connected: {client?.Connected}");
                 }
             }
             else if (State == State.Terminated)
             {
-                // Clean up TCP connection
-                if (stream != null) stream.Close();
-                if (client != null) client.Close();
+                DisconnectFromServer();
+            }
+        }
+
+        private void ConnectToServer()
+        {
+            try
+            {
+                client = new TcpClient(host, port);
+                stream = client.GetStream();
+                stream.ReadTimeout = 30000;
+                stream.WriteTimeout = 30000;
+                Print("Connected to Python server");
+            }
+            catch (Exception e)
+            {
+                Print($"Connection failed: {e.Message}");
             }
         }
 
         private void SendHistoricalData()
         {
-            if (historicalDataSent || Bars == null || CurrentBar < historicalBarsToSend)
+            if (historicalDataSent || Bars == null || client == null || !client.Connected)
                 return;
 
             try
             {
-                Print($"Preparing to send {historicalBarsToSend} historical bars...");
+                var data = new StringBuilder();
+                int barsToSend = Math.Min(Bars.Count, historicalBarsToSend);
                 
-                // Collect historical data with validation
-                StringBuilder historicalData = new StringBuilder();
-                int startIndex = Math.Max(0, CurrentBar - historicalBarsToSend);
-                int actualBars = 0;
-                
-                for (int i = startIndex; i <= CurrentBar; i++)
+                for (int i = Math.Min(barsToSend - 1, CurrentBar); i >= 0; i--)
                 {
-                    // Validate data before sending
-                    if (Times[0][i] != null && Opens[0][i] > 0 && Highs[0][i] > 0 && 
-                        Lows[0][i] > 0 && Closes[0][i] > 0 && Volumes[0][i] >= 0)
-                    {
-                        historicalData.AppendLine($"{Times[0][i].ToString("yyyy-MM-dd HH:mm:ss")},{Opens[0][i]},{Highs[0][i]},{Lows[0][i]},{Closes[0][i]},{Volumes[0][i]}");
-                        actualBars++;
-                    }
+                    data.AppendLine($"{Time[i]:yyyy-MM-dd HH:mm:ss},{Open[i]:F2},{High[i]:F2},{Low[i]:F2},{Close[i]:F2},{Volume[i]}");
                 }
                 
-                if (actualBars == 0)
-                {
-                    Print("No valid historical data to send");
-                    return;
-                }
-                
-                historicalData.Append(DELIMITER);
-
-                // Send historical data
-                byte[] data = Encoding.UTF8.GetBytes(historicalData.ToString());
-                stream.Write(data, 0, data.Length);
+                string message = data.ToString() + "||";
+                byte[] buffer = Encoding.UTF8.GetBytes(message);
+                stream.Write(buffer, 0, buffer.Length);
                 stream.Flush();
-                Print($"Sent {actualBars} valid historical bars");
 
-                // Wait for confirmation with timeout
-                string response = ReceiveResponse();
-                
+                string response = ReadResponse();
+                Print($"Historical data sent, response: {response}");
                 if (response == "HISTORICAL_PROCESSED")
                 {
                     historicalDataSent = true;
-                    Print("Historical data successfully processed by Python server");
-                }
-                else if (response == "ERROR")
-                {
-                    Print("Python server reported error processing historical data");
+                    Print("Historical data confirmed by Python server");
                 }
                 else
                 {
-                    Print($"Unexpected response from server: {response}");
+                    Print("Historical data not confirmed - check Python server");
                 }
             }
             catch (Exception e)
@@ -132,114 +127,66 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         protected override void OnBarUpdate()
         {
-            if (CurrentBar < BarsRequiredToTrade || client == null || !client.Connected || !historicalDataSent)
+            if (State != State.Realtime || 
+                CurrentBar < BarsRequiredToTrade || 
+                client == null || !client.Connected || 
+                !historicalDataSent)
                 return;
 
             try
             {
-                // Send real-time OHLC and volume data with proper formatting
-                string dataLine = $"{Time[0].ToString("yyyy-MM-dd HH:mm:ss")},{Open[0]},{High[0]},{Low[0]},{Close[0]},{Volume[0]}";
-                byte[] data = Encoding.UTF8.GetBytes(dataLine + "\n");
+                // Send real-time bar data
+                string barData = $"{Time[0]:yyyy-MM-dd HH:mm:ss},{Open[0]:F2},{High[0]:F2},{Low[0]:F2},{Close[0]:F2},{Volume[0]}";
+                byte[] data = Encoding.UTF8.GetBytes(barData + "\n");
                 stream.Write(data, 0, data.Length);
-                stream.Flush(); // Ensure data is sent immediately
-                Print($"Sent real-time data: {dataLine}");
+                stream.Flush();
 
-                // Receive signal from Python server with timeout
-                string signal = ReceiveResponse();
+                // Get trading signal
+                string signal = ReadResponse();
                 
-                if (string.IsNullOrEmpty(signal))
-                {
-                    Print("No response received from Python server");
-                    return;
-                }
-                
-                Print($"Received signal: {signal}");
-
-                // Execute trades based on signal with additional validation
+                // Execute trades
                 if (signal == "BUY" && Position.MarketPosition == MarketPosition.Flat)
                 {
-                    EnterLong(contractSize, "LongEntry");
-                    SetStopLoss("LongEntry", CalculationMode.Ticks, stopLossTicks, false);
-                    SetProfitTarget("LongEntry", CalculationMode.Ticks, profitTargetTicks);
-                    Print($"Executed BUY order at {Close[0]}");
+                    EnterLong(contractSize, "Long");
+                    SetStopLoss("Long", CalculationMode.Ticks, stopLossTicks, false);
+                    SetProfitTarget("Long", CalculationMode.Ticks, profitTargetTicks);
                 }
                 else if (signal == "SELL" && Position.MarketPosition == MarketPosition.Flat)
                 {
-                    EnterShort(contractSize, "ShortEntry");
-                    SetStopLoss("ShortEntry", CalculationMode.Ticks, stopLossTicks, false);
-                    SetProfitTarget("ShortEntry", CalculationMode.Ticks, profitTargetTicks);
-                    Print($"Executed SELL order at {Close[0]}");
-                }
-                else if (signal == "ERROR")
-                {
-                    Print("Python server returned ERROR - check data format");
+                    EnterShort(contractSize, "Short");
+                    SetStopLoss("Short", CalculationMode.Ticks, stopLossTicks, false);
+                    SetProfitTarget("Short", CalculationMode.Ticks, profitTargetTicks);
                 }
             }
             catch (Exception e)
             {
-                Print($"TCP error: {e.Message}");
-                ReconnectToServer();
+                Print($"Error: {e.Message}");
+                ConnectToServer(); // Simple reconnect
             }
         }
-        
-        private string ReceiveResponse()
+
+        private string ReadResponse()
         {
             try
             {
-                // Set a read timeout to prevent hanging
-                stream.ReadTimeout = 5000; // 5 seconds
-                
                 byte[] buffer = new byte[1024];
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
-                
-                if (bytesRead > 0)
-                {
-                    string response = Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim();
-                    return response;
-                }
-                
-                return null;
+                return Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim();
             }
-            catch (Exception e)
+            catch
             {
-                Print($"Error receiving response: {e.Message}");
                 return null;
             }
         }
-        
-        private void ReconnectToServer()
+
+        private void DisconnectFromServer()
         {
             try
             {
-                Print("Attempting to reconnect to Python server...");
-                
-                if (stream != null) 
-                {
-                    stream.Close();
-                    stream = null;
-                }
-                if (client != null) 
-                {
-                    client.Close();
-                    client = null;
-                }
-                
-                // Wait before reconnecting
-                System.Threading.Thread.Sleep(1000);
-                
-                client = new TcpClient(host, port);
-                stream = client.GetStream();
-                stream.ReadTimeout = 5000;
-                stream.WriteTimeout = 5000;
-                
-                Print("Reconnected to Python server");
-                historicalDataSent = false; // Resend historical data on reconnect
-                SendHistoricalData();
+                stream?.Close();
+                client?.Close();
             }
-            catch (Exception e)
-            {
-                Print($"Reconnection failed: {e.Message}");
-            }
+            catch { }
         }
     }
 }
